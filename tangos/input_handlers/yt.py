@@ -22,7 +22,7 @@ class YtInputHandler(finding.PatternBasedFileDiscovery, HandlerBase):
 
     def get_timestep_properties(self, ts_extension):
         ts_filename =  self._extension_to_filename(ts_extension)
-        f = yt.load(ts_filename)
+        f = yt.load(ts_filename, hint="RAMSESDataset")
         time_gyr = float(f.current_time.in_units("Gyr"))
         redshift = f.current_redshift
         results = {'time_gyr': time_gyr, 'redshift': redshift,
@@ -32,7 +32,7 @@ class YtInputHandler(finding.PatternBasedFileDiscovery, HandlerBase):
     def load_timestep_without_caching(self, ts_extension, mode=None):
         if mode!=None:
             raise ValueError("Custom load modes are not supported with yt")
-        f = yt.load(self._extension_to_filename(ts_extension))
+        f = yt.load(self._extension_to_filename(ts_extension), hint="RAMSESDataset")
         return f
 
     def load_object(self, ts_extension, finder_id, finder_offset, object_typetag='halo', mode=None):
@@ -194,13 +194,14 @@ class YtInputHandler(finding.PatternBasedFileDiscovery, HandlerBase):
 
 
 class YtRamsesRockstarInputHandler(YtInputHandler):
+    #logger.warning("Anatole's Tangos changes")
     patterns = ["output_0????"]
     auxiliary_file_patterns = ["halos_*.bin"]
 
     def load_timestep_without_caching(self, ts_extension, mode=None):
         if mode is not None:
             raise ValueError("Custom load modes are not supported with yt")
-        return yt.load(self._extension_to_filename(ts_extension))
+        return yt.load(self._extension_to_filename(ts_extension), hint="RAMSESDataset")
 
     def _load_halo_cat_without_caching(self, ts_extension, snapshot_file):
         # Check whether datasets.txt exists (i.e., if rockstar was run with yt)
@@ -231,8 +232,8 @@ class YtRamsesRockstarInputHandler(YtInputHandler):
         if self._can_enumerate_objects_from_statfile(ts_extension, object_typetag):
             yield from self._enumerate_objects_from_statfile(ts_extension, object_typetag)
         else:
-            logger.warning("No halo statistics file found for timestep %r", ts_extension)
-            logger.warning(" => enumerating %ss directly using yt", object_typetag)
+            #logger.warning("No halo statistics file found for timestep %r", ts_extension)
+            #logger.warning(" => enumerating %ss directly using yt", object_typetag)
 
             _catalogue, catalogue_data = self._load_halo_cat(ts_extension, object_typetag)
             num_objects = len(catalogue_data["halos", "virial_radius"])
@@ -241,25 +242,41 @@ class YtRamsesRockstarInputHandler(YtInputHandler):
             _f = self.load_timestep(ts_extension)
 
             for i in range(num_objects):
+                # obj is a yt sphere in output_XXXXX, centered at the position of the halo in the catalogue
                 obj = self.load_object(
                     ts_extension,
-                    int(catalogue_data["halos","particle_identifier"][i]),
+                    int(catalogue_data["halos", "particle_identifier"][i]),
                     i,
                     object_typetag
                 )
-                NDM = len(obj["DM", "particle_ones"])
-                NGas = 0 # cells
-                NStar = len(obj["star", "particle_ones"])
+                try:
+                    NDM = len(obj["DM", "particle_ones"])
+                    NGas = 0 # cells
+                    NStar = len(obj["star", "particle_ones"])
+                except:
+                    #logger.warning("Assuming the sim is DMO")
+                    NDM = len(obj["nbody", "particle_ones"])
+                    NGas = 0 # cells
+                    NStar = 0
                 if NDM + NGas + NStar> min_halo_particles:
                     yield i, int(catalogue_data["halos","particle_identifier"][i]), NDM, NStar, NGas
 
     def load_object(self, ts_extension, finder_id, finder_offset, object_typetag='halo', mode=None):
+        # f is a ramses output with its own definition of code_length
         f = self.load_timestep(ts_extension, mode)
+        
+        # cat is a rockstar output with its own definition of code_length
         cat, cat_dat = self._load_halo_cat(ts_extension, object_typetag)
         index = np.argwhere(cat_dat["halos", "particle_identifier"] == finder_id)[0, 0]
-        center = cat_dat["halos","particle_position"][index]
-        center += f.domain_left_edge - cat.domain_left_edge
-        radius = cat_dat["halos", "virial_radius"][index]
+        
+        # Since the goal is to take a sphere in f (ramses output) at the position and radius of the halo in cat (rockstar output),
+        # we need convert both to physical units to avoid any confusion
+        
+        center = cat_dat["halos", "particle_position"][index].to("Mpccm/h")
+        center += f.domain_left_edge.to("Mpccm/h") - cat.domain_left_edge.to("Mpccm/h")
+        
+        radius = cat_dat["halos", "virial_radius"][index].to("Mpccm/h")
+        
         return f.sphere(center, radius)
 
 
