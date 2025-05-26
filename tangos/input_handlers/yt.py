@@ -240,6 +240,12 @@ class YtRamsesRockstarInputHandler(YtInputHandler):
 
             # Make sure this isn't garbage collected
             _f = self.load_timestep(ts_extension)
+            # Check if a certain particles metallicity fields exist
+            # If they do, we assume this is a hydrodynamical simulation
+            if np.sum(np.isin(_f.field_list,  ('nbody', 'particle_metallicity_001'))) > 10:
+                is_dmo = False
+            else:
+                is_dmo = True
 
             for i in range(num_objects):
                 # obj is a yt sphere in output_XXXXX, centered at the position of the halo in the catalogue
@@ -249,15 +255,14 @@ class YtRamsesRockstarInputHandler(YtInputHandler):
                     i,
                     object_typetag
                 )
-                try:
-                    NDM = len(obj["DM", "particle_ones"])
-                    NGas = 0 # cells
-                    NStar = len(obj["star", "particle_ones"])
-                except:
-                    #logger.warning("Assuming the sim is DMO")
+                if is_dmo:
                     NDM = len(obj["nbody", "particle_ones"])
                     NGas = 0 # cells
                     NStar = 0
+                else:
+                    NDM = len(obj["DM", "particle_ones"])
+                    NGas = 0 # cells
+                    NStar = len(obj["star", "particle_ones"])
                 if NDM + NGas + NStar> min_halo_particles:
                     yield i, int(catalogue_data["halos","particle_identifier"][i]), NDM, NStar, NGas
 
