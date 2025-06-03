@@ -240,9 +240,10 @@ class YtRamsesRockstarInputHandler(YtInputHandler):
 
             # Make sure this isn't garbage collected
             _f = self.load_timestep(ts_extension)
+            
             # Check if a certain particles metallicity fields exist
             # If they do, we assume this is a hydrodynamical simulation
-            if np.sum(np.isin(_f.field_list,  ('nbody', 'particle_metallicity_001'))) > 10:
+            if np.sum(np.isin(_f.field_list, 'ramses')) > 0:
                 is_dmo = False
             else:
                 is_dmo = True
@@ -263,7 +264,7 @@ class YtRamsesRockstarInputHandler(YtInputHandler):
                     NDM = len(obj["DM", "particle_ones"])
                     NGas = 0 # cells
                     NStar = len(obj["star", "particle_ones"])
-                if NDM + NGas + NStar> min_halo_particles:
+                if NDM + NGas + NStar > min_halo_particles:
                     yield i, int(catalogue_data["halos","particle_identifier"][i]), NDM, NStar, NGas
 
     def load_object(self, ts_extension, finder_id, finder_offset, object_typetag='halo', mode=None):
