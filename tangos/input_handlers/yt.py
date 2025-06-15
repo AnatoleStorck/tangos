@@ -92,8 +92,10 @@ class YtInputHandler(finding.PatternBasedFileDiscovery, HandlerBase):
         #     if halo_min <= itangos <= halo_max
         # ])
         
-        # Alternative approach to compute the sets of particle ids in each halo
-        # This is faster as it avoids repeated calls to h2.halo(), which dominates the runtime
+        logger.info("Computing halo members of %r halos for %r", len(h2.r["particle_identifier"].astype(int)), ts2)
+        # Alternative approach to compute the sets of particle ids in each halo.
+        # Faster as it avoids repeated calls to h2.halo(), which dominates the runtime,
+        # at the cost of some memory overhead.
         members2 = [h2.halo("halos", irockstar).member_ids for irockstar in h2.r["particle_identifier"].astype(int) if halo_min <= irockstar <= halo_max]
         members2halo2 = np.concatenate([np.full(len(ids), i, dtype=int) for i, ids in enumerate(members2)])
         
@@ -103,6 +105,7 @@ class YtInputHandler(finding.PatternBasedFileDiscovery, HandlerBase):
         members2_sorted = np.sort(members2)
         members2halo2_sorted = members2halo2[np.argsort(members2)]
 
+        logger.info("Computing intersection of halo members between %r and %r", ts1, ts2)
         # Compute size of intersection of all sets in h1 with those in h2
         cat = []
         for ihalo1_tangos, ihalo1_rockstar in enumerate(h1.r["particle_identifier"].astype(int)):
@@ -118,9 +121,9 @@ class YtInputHandler(finding.PatternBasedFileDiscovery, HandlerBase):
             try:
                 mask_searchsorted_reduced = np.isin(members2_sorted[mask_searchsorted], ids1)
             except:
-                # This happens when an id in ids1 is at the end of members2_sorted
-                # and thus np.searchsorted returns an index that is out of bounds.
-                # Should happen at most once per output-pairs.
+                # This happens when an id in ids1 is at the end of members2_sorted and thus
+                # np.searchsorted returns an index that is out of bounds.
+                # Should happen at most once per output-pairs as ids are uniquely assigned to halos.
                 mask_searchsorted = mask_searchsorted[:-1]
                 mask_searchsorted_reduced = np.isin(members2_sorted[mask_searchsorted], ids1)
 
