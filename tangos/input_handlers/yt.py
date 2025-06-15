@@ -79,18 +79,29 @@ class YtInputHandler(finding.PatternBasedFileDiscovery, HandlerBase):
         else:
             h2, _ = output_handler_for_ts2._load_halo_cat(ts2, object_typetag)
 
-        # Compute the sets of particle ids in each halo
-        members2 = np.concatenate([
-            h2.halo("halos", i).member_ids
-            for i in h2.r["particle_identifier"].astype(int)
-            if halo_min <= i <= halo_max
-        ])
+        # # Compute the sets of particle ids in each halo
+        # members2 = np.concatenate([
+        #     h2.halo("halos", i).member_ids
+        #     for i in h2.r["particle_identifier"].astype(int)
+        #     if halo_min <= i <= halo_max
+        # ])
 
-        members2halo2 = np.concatenate([
-            np.repeat(itangos, len(h2.halo("halos", irockstar).member_ids))
-            for itangos, irockstar in enumerate(h2.r["particle_identifier"].astype(int))
-            if halo_min <= itangos <= halo_max
-        ])
+        # members2halo2 = np.concatenate([
+        #     np.repeat(itangos, len(h2.halo("halos", irockstar).member_ids))
+        #     for itangos, irockstar in enumerate(h2.r["particle_identifier"].astype(int))
+        #     if halo_min <= itangos <= halo_max
+        # ])
+        
+        # Alternative approach to compute the sets of particle ids in each halo
+        # This is faster as it avoids repeated calls to h2.halo(), which dominates the runtime
+        members2 = [h2.halo("halos", irockstar).member_ids for irockstar in h2.r["particle_identifier"].astype(int) if halo_min <= irockstar <= halo_max]
+        members2halo2 = np.concatenate([np.full(len(ids), i, dtype=int) for i, ids in enumerate(members2)])
+        
+        members2 = np.concatenate(members2)
+
+        # Sort for np.searchsorted
+        members2_sorted = np.sort(members2)
+        members2halo2_sorted = members2halo2[np.argsort(members2)]
 
         # Compute size of intersection of all sets in h1 with those in h2
         cat = []
@@ -99,14 +110,26 @@ class YtInputHandler(finding.PatternBasedFileDiscovery, HandlerBase):
                 continue
 
             ids1 = h1.halo("halos", ihalo1_rockstar).member_ids
-            #mask = np.in1d(ids1, members2)
-            mask = np.in1d(members2, ids1)
-            if mask.sum() == 0:
+            
+            # NOTE: Need to make the array unique as there are particles in ts2 which are not in any
+            #       halos compared to ts1 (ex: stripping, ejected particles, etc.).
+            #       The same is true in reverse (ex: accretion).
+            mask_searchsorted = np.unique(np.searchsorted(members2_sorted, ids1))
+            try:
+                mask_searchsorted_reduced = np.isin(members2_sorted[mask_searchsorted], ids1)
+            except:
+                # This happens when an id in ids1 is at the end of members2_sorted
+                # and thus np.searchsorted returns an index that is out of bounds.
+                # Should happen at most once per output-pairs.
+                mask_searchsorted = mask_searchsorted[:-1]
+                mask_searchsorted_reduced = np.isin(members2_sorted[mask_searchsorted], ids1)
+
+            if mask_searchsorted_reduced.sum() == 0:
                 cat.append([])
                 continue
 
             # Get the halo ids of the particles in the other snapshot
-            idhalo2 = members2halo2[mask]
+            idhalo2 = members2halo2_sorted[mask_searchsorted][mask_searchsorted_reduced]
 
             # Count the number of particles in each halo
             idhalo2, counts = np.unique(idhalo2, return_counts=True)
@@ -118,15 +141,15 @@ class YtInputHandler(finding.PatternBasedFileDiscovery, HandlerBase):
             weights = weights[_order]
 
             # Keep only the links with a significant number of particles
-            mask = weights > threshold
-            if mask.sum() == 0:
+            mask_significant = weights > threshold
+            if mask_significant.sum() == 0:
                 cat.append(
                     []
                 )
                 continue
 
-            idhalo2 = idhalo2[mask]
-            weights = weights[mask]
+            idhalo2 = idhalo2[mask_significant]
+            weights = weights[mask_significant]
 
             cat.append(list(zip(idhalo2, weights)))
 
